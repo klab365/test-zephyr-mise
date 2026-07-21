@@ -1,0 +1,18 @@
+manifest:
+  remotes:
+    - name: nrfconnect
+      url-base: https://github.com/nrfconnect
+    - name: klab365
+      url-base: https://github.com/klab365
+
+  projects:
+    - name: sdk-nrf
+      remote: nrfconnect
+      revision: v3.4.0
+      path: nrf
+      import:
+        path-prefix: _deps
+    - name: actor_framework_cxx
+      remote: klab365
+      revision: V1.2.1
+      path: _deps/modules/lib/actor_framework_cxx

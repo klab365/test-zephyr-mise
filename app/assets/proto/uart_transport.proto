@@ -1,0 +1,6 @@
+syntax = "proto3";
+
+message UartData {
+  uint32 total_size = 1;
+  bytes data = 2;
+}

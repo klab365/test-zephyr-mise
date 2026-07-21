@@ -1,0 +1,8 @@
+_deps
+build
+.west
+.venv
+__pycache__
+*_pb2.py
+.DS_Store
+.env

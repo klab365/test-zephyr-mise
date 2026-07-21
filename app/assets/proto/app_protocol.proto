@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+enum MessageSource {
+  SOURCE_UNSPECIFIED = 0;
+  SOURCE_BLE = 1;
+  SOURCE_UART = 2;
+}
+
+enum MatrixSymbol {
+  MATRIX_SYMBOL_UNSPECIFIED = 0;
+  MATRIX_SYMBOL_OFF = 1;
+  MATRIX_SYMBOL_SMILE = 2;
+  MATRIX_SYMBOL_HEART = 3;
+  MATRIX_SYMBOL_CHECK = 4;
+  MATRIX_SYMBOL_CROSS = 5;
+}
+
+message RequestEnvelope {
+  uint32 request_id = 1;
+  MessageSource source = 2;
+  oneof payload {
+    EchoRequest echo = 3;
+    PingRequest ping = 4;
+    SetMatrixSymbolRequest set_matrix_symbol = 5;
+  }
+}
+
+message ResponseEnvelope {
+  uint32 request_id = 1;
+  MessageSource source = 2;
+  oneof payload {
+    EchoResponse echo = 3;
+    PingResponse ping = 4;
+    SetMatrixSymbolResponse set_matrix_symbol = 5;
+  }
+}
+
+message EchoRequest {
+  bytes payload = 1;
+}
+
+message EchoResponse {
+  bytes payload = 1;
+}
+
+message PingRequest {
+  uint32 sequence = 1;
+}
+
+message PingResponse {
+  uint32 sequence = 1;
+}
+
+message SetMatrixSymbolRequest {
+  MatrixSymbol symbol = 1;
+}
+
+message SetMatrixSymbolResponse {
+  MatrixSymbol symbol = 1;
+}

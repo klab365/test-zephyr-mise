@@ -1,0 +1,63 @@
+[plugins]
+zephyr-sdk = "https://github.com/klab365/mise-zephyr-sdk.git"
+
+[env]
+ZEPHYR_SDK_TOOLCHAINS = "x86_64-zephyr-elf arm-zephyr-eabi"
+BOARD = "bbc_microbit_v2"
+BUILD_DIR = "build/microbit-v2"
+PROBE_RS_CHIP = "nRF52833_xxAA"
+_.python.venv = { create = true, path = ".venv" }
+_.file = { path = ".env" }
+
+[tools]
+zephyr-sdk = "1.0.1"
+cmake = "3"
+ninja = "latest"
+uv = "0.11.6"
+"cargo:probe-rs-tools" = "latest"
+
+[hooks]
+postinstall = [
+    {task="setup"},
+    {task="update"}
+]
+
+[tasks.setup]
+description = "Install Python deps and update West projects"
+run = [
+    "uv pip install -r requirements.txt",
+]
+
+[tasks.update]
+description = "Update West projects"
+run = ".venv/bin/west update"
+
+[tasks.build]
+description = "Build the BLE actor app"
+run = ".venv/bin/west build -p auto -b \"$BOARD\" app -d \"$BUILD_DIR\""
+
+[tasks.flash]
+description = "Flash the current build with probe-rs"
+depends = ["build"]
+run = [
+    "probe-rs download --chip \"$PROBE_RS_CHIP\" --binary-format hex \"$BUILD_DIR/app/zephyr/zephyr.hex\" --verify",
+    "probe-rs reset --chip \"$PROBE_RS_CHIP\"",
+]
+
+[tasks.menuconfig]
+description = "Open app menuconfig"
+run = ".venv/bin/west build -t menuconfig -d \"$BUILD_DIR\""
+
+[tasks.clean]
+description = "Remove build output"
+run = "rm -rf \"$BUILD_DIR\""
+
+[tasks.test-integration]
+description = "Run integration tests"
+usage = '''
+arg <case> - specify the test case to run.
+'''
+run = '''
+probe-rs reset --chip nRF52833_xxAA
+python {{usage.case}} --name='klab BLE'
+'''

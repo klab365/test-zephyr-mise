@@ -1,0 +1,3 @@
+-r _deps/zephyr/scripts/requirements.txt
+-r _deps/nrf/scripts/requirements-build.txt
+-r tests/integration/requirements.txt

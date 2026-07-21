@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+message BleChunk {
+  uint32 message_id = 1;
+  uint32 offset = 2;
+  uint32 total_size = 3;
+  bytes data = 4;
+  bool final = 5;
+}
+
+message BleAdvertisingData {
+  uint32 appearance = 1;
+  bytes service_uuid128 = 2;
+  bytes manufacturer_data = 3;
+  bytes device_name = 4;
+}
