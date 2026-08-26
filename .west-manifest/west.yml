@@ -14,5 +14,5 @@ manifest:
         path-prefix: _deps
     - name: actor_framework_cxx
       remote: klab365
-      revision: V1.2.1
+      revision: V1.3.0
       path: _deps/modules/lib/actor_framework_cxx
