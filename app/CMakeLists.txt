@@ -38,16 +38,17 @@ add_dependencies(app app_mcumgr_cddl)
 target_sources(app PRIVATE
   src/main.c
   src/app_events.c
-  src/echo_actor.c
-  src/ping_actor.c
-  src/mcumgr_app.c
   src/smp_ble.c
   ${APP_CDDL_GENERATED_SOURCES}
 )
 
 target_include_directories(app PRIVATE
   src/include
+  src/mcumgr/include
   ${APP_CDDL_GENERATED_DIR}
 )
 
+add_subdirectory(src/mcumgr)
+add_subdirectory(src/echo)
+add_subdirectory(src/ping)
 add_subdirectory(src/hmi)
