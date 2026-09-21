@@ -1,5 +1,6 @@
 _deps
 build
+app/src/generated/
 .west
 .venv
 __pycache__

@@ -1,34 +1,16 @@
-#include <string.h>
-
-#include <zephyr/kernel.h>
-#include <zephyr/sys/printk.h>
-
 #include "app_events.h"
 
 IPC_ACTOR_DEFINE(echo_actor, "echo", 512, K_PRIO_PREEMPT(7), 2,
-                 IPC_MESSAGE_MAX(AppRequestEvent));
+                 IPC_MESSAGE_MAX(AppMgmtRequestEvent));
 
-IPC_ACTOR_HANDLE(echo_actor, AppRequestEvent, on_app_request_event)
+IPC_ACTOR_HANDLE(echo_actor, AppMgmtRequestEvent, on_app_mgmt_request)
 {
     ARG_UNUSED(self);
     ARG_UNUSED(raw_msg);
 
-    const RequestEnvelope *request = &msg->envelope;
-    if (request->which_payload != RequestEnvelope_echo_tag) {
+    if (msg->command != APP_MGMT_CMD_ECHO) {
         return;
     }
 
-    AppResponseEvent_payload_t response = {};
-    response.envelope.request_id = request->request_id;
-    response.envelope.source = request->source;
-    response.envelope.which_payload = ResponseEnvelope_echo_tag;
-    response.envelope.payload.echo.payload.size = request->payload.echo.payload.size;
-    memcpy(response.envelope.payload.echo.payload.bytes,
-           request->payload.echo.payload.bytes,
-           request->payload.echo.payload.size);
-
-    int rc = ipc_publish(AppResponseEvent, response);
-    if (rc != 0) {
-        printk("echo actor: failed to publish response: %d\n", rc);
-    }
+    app_mgmt_respond(msg->transaction, 0, 0U, msg->data, msg->data_len);
 }

@@ -3,6 +3,7 @@ zephyr-sdk = "https://github.com/klab365/mise-zephyr-sdk.git"
 
 [env]
 ZEPHYR_SDK_TOOLCHAINS = "x86_64-zephyr-elf arm-zephyr-eabi"
+ZEPHYR_BASE = "{{config_root}}/_deps/zephyr"
 BOARD = "bbc_microbit_v2"
 BUILD_DIR = "build/microbit-v2"
 PROBE_RS_CHIP = "nRF52833_xxAA"
@@ -32,15 +33,28 @@ run = [
 description = "Update West projects"
 run = ".venv/bin/west update"
 
+[tasks.generate-cddl]
+description = "Generate C CBOR codecs from protocol/app_mcumgr.cddl into the build directory"
+run = '''
+PATH="/usr/bin:/bin:$PATH" .venv/bin/west build -p auto --no-sysbuild \
+  -b "$BOARD" app -d "$BUILD_DIR" -t app_mcumgr_cddl
+'''
+
+[tasks.check-cddl]
+description = "Validate the CDDL schema by generating and compiling its codecs"
+depends = ["build"]
+
 [tasks.build]
-description = "Build the BLE actor app"
-run = ".venv/bin/west build -p auto -b \"$BOARD\" app -d \"$BUILD_DIR\""
+description = "Build the mcumgr actor app"
+run = '''
+PATH="/usr/bin:/bin:$PATH" .venv/bin/west build -p auto --no-sysbuild -b "$BOARD" app -d "$BUILD_DIR"
+'''
 
 [tasks.flash]
 description = "Flash the current build with probe-rs"
 depends = ["build"]
 run = [
-    "probe-rs download --chip \"$PROBE_RS_CHIP\" --binary-format hex \"$BUILD_DIR/app/zephyr/zephyr.hex\" --verify",
+    "probe-rs download --chip \"$PROBE_RS_CHIP\" --binary-format hex \"$BUILD_DIR/zephyr/zephyr.hex\" --verify",
     "probe-rs reset --chip \"$PROBE_RS_CHIP\"",
 ]
 
@@ -52,12 +66,25 @@ run = ".venv/bin/west build -t menuconfig -d \"$BUILD_DIR\""
 description = "Remove build output"
 run = "rm -rf \"$BUILD_DIR\""
 
-[tasks.test-integration]
-description = "Run integration tests"
+[tasks.serial]
+description = "Open the device UART console"
 usage = '''
-arg <case> - specify the test case to run.
+arg port help="e.g. /dev/cu.usbmodem1102"
+'''
+run = "python -m serial.tools.miniterm {{usage.port}} 115200"
+
+[tasks.test-integration]
+description = "Run an SMP-over-BLE integration client"
+usage = '''
+arg case help="echo, ping, or symbol"
 '''
 run = '''
-probe-rs reset --chip nRF52833_xxAA
-python {{usage.case}} --name='klab BLE'
+probe-rs reset --chip "$PROBE_RS_CHIP"
+case "{{usage.case}}" in
+  echo) python clients/echo_client.py --name='klab BLE' --payload hello ;;
+  ping) python clients/ping_client.py --name='klab BLE' --sequence 1 ;;
+  symbol) python clients/symbol_client.py --name='klab BLE' --symbol smile ;;
+  *) echo "Unknown integration case: {{usage.case}}" >&2; exit 2 ;;
+esac
 '''
+

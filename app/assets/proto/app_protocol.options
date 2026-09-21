@@ -1,2 +1,0 @@
-EchoRequest.payload max_size:64
-EchoResponse.payload max_size:64

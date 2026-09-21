@@ -1,0 +1,13 @@
+menu "Application configuration"
+
+config APP_MCUMGR_CUSTOM_GROUP
+	bool
+	default y
+	select MCUMGR_SMP_CBOR_MIN_DECODING_LEVEL_1
+	select MCUMGR_SMP_CBOR_MIN_ENCODING_LEVEL_1
+	help
+	  The application mcumgr group decodes and encodes one CBOR map level.
+
+endmenu
+
+source "Kconfig.zephyr"

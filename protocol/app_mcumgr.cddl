@@ -1,0 +1,26 @@
+; Shared wire contract for the application's mcumgr group (64).
+; Command IDs: echo=0, ping=1, set-matrix-symbol=2.
+
+app-data = bstr .size 0..256
+matrix-symbol = 1..5
+
+echo-request = {
+  1 => app-data,
+}
+echo-response = {
+  1 => app-data,
+}
+
+ping-request = {
+  1 => uint,
+}
+ping-response = {
+  1 => uint,
+}
+
+set-matrix-symbol-request = {
+  1 => matrix-symbol,
+}
+set-matrix-symbol-response = {
+  1 => matrix-symbol,
+}

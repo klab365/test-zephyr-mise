@@ -1,0 +1,4 @@
+bleak>=0.22.3
+# zcbor's CDDL generator currently needs the pre-6.0 cbor2 exception API.
+cbor2>=5.6.0,<6.0
+pyserial>=3.5

@@ -5,6 +5,8 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
 
+void smp_ble_start(void);
+
 int main(void)
 {
 	printk("Example actor app\n");
@@ -15,6 +17,7 @@ int main(void)
 		return rc;
 	}
 	printk("actors started and ready to go\n");
+	smp_ble_start();
 
 	return 0;
 }

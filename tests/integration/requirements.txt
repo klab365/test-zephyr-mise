@@ -1,3 +1,0 @@
-bleak>=0.22.3
-grpcio-tools>=1.64.0
-protobuf>=5.27.0

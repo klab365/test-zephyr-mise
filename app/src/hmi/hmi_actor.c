@@ -12,6 +12,14 @@
 #include "app_events.h"
 #include "hmi.h"
 
+enum matrix_symbol {
+    MATRIX_SYMBOL_OFF = 1,
+    MATRIX_SYMBOL_SMILE,
+    MATRIX_SYMBOL_HEART,
+    MATRIX_SYMBOL_CHECK,
+    MATRIX_SYMBOL_CROSS,
+};
+
 IPC_EVENT_DEFINE(LongPressEvent);
 
 #define HMI_BUTTON_NODE DT_ALIAS(sw0)
@@ -83,29 +91,29 @@ static int write_matrix_pattern(const uint8_t pattern[5], bool on)
     return on ? display_blanking_off(matrix) : display_blanking_on(matrix);
 }
 
-static int write_matrix_symbol(MatrixSymbol symbol)
+static int write_matrix_symbol(enum matrix_symbol symbol)
 {
     const uint8_t *pattern;
     bool on;
 
     switch (symbol) {
-    case MatrixSymbol_MATRIX_SYMBOL_OFF:
+    case MATRIX_SYMBOL_OFF:
         pattern = symbol_off;
         on = false;
         break;
-    case MatrixSymbol_MATRIX_SYMBOL_SMILE:
+    case MATRIX_SYMBOL_SMILE:
         pattern = symbol_smile;
         on = true;
         break;
-    case MatrixSymbol_MATRIX_SYMBOL_HEART:
+    case MATRIX_SYMBOL_HEART:
         pattern = symbol_heart;
         on = true;
         break;
-    case MatrixSymbol_MATRIX_SYMBOL_CHECK:
+    case MATRIX_SYMBOL_CHECK:
         pattern = symbol_check;
         on = true;
         break;
-    case MatrixSymbol_MATRIX_SYMBOL_CROSS:
+    case MATRIX_SYMBOL_CROSS:
         pattern = symbol_cross;
         on = true;
         break;
@@ -123,8 +131,7 @@ static int write_matrix_symbol(MatrixSymbol symbol)
 
 static int write_matrix(bool on)
 {
-    return write_matrix_symbol(on ? MatrixSymbol_MATRIX_SYMBOL_SMILE
-                                  : MatrixSymbol_MATRIX_SYMBOL_OFF);
+    return write_matrix_symbol(on ? MATRIX_SYMBOL_SMILE : MATRIX_SYMBOL_OFF);
 }
 
 static void start_knight_rider(void)
@@ -285,7 +292,7 @@ static int init_hardware(void)
 }
 
 IPC_ACTOR_DEFINE(hmi_actor, "hmi", 1024, K_PRIO_PREEMPT(7), 4,
-                 IPC_MESSAGE_MAX(AppRequestEvent, LongPressEvent));
+                 IPC_MESSAGE_MAX(AppMgmtRequestEvent, LongPressEvent));
 
 IPC_START_HOOK(hmi_actor, on_hmi_start)
 {
@@ -308,36 +315,24 @@ IPC_ACTOR_HANDLE(hmi_actor, LongPressEvent, on_long_press_event)
     printk("hmi actor: received long press event\n");
 }
 
-IPC_ACTOR_HANDLE(hmi_actor, AppRequestEvent, on_app_request_event)
+IPC_ACTOR_HANDLE(hmi_actor, AppMgmtRequestEvent, on_app_mgmt_request)
 {
     ARG_UNUSED(self);
     ARG_UNUSED(raw_msg);
 
-    const RequestEnvelope *request = &msg->envelope;
-    int rc;
-    AppResponseEvent_payload_t response = {};
-
-    if (request->which_payload != RequestEnvelope_set_matrix_symbol_tag) {
+    if (msg->command != APP_MGMT_CMD_SET_MATRIX_SYMBOL) {
         return;
     }
 
     knight_rider_active = false;
-    (void) k_work_cancel_delayable(&knight_rider_work);
+    (void)k_work_cancel_delayable(&knight_rider_work);
 
-    MatrixSymbol symbol = request->payload.set_matrix_symbol.symbol;
-    rc = write_matrix_symbol(symbol);
-    if (rc != 0) {
-        printk("hmi actor: invalid matrix symbol: %d\n", symbol);
-        return;
+    int rc = write_matrix_symbol((enum matrix_symbol)msg->value);
+    if (rc == 0) {
+        matrix_on = (msg->value != MATRIX_SYMBOL_OFF);
+    } else {
+        printk("hmi actor: invalid matrix symbol: %u\n", msg->value);
     }
-    matrix_on = (symbol != MatrixSymbol_MATRIX_SYMBOL_OFF);
-    response.envelope.which_payload = ResponseEnvelope_set_matrix_symbol_tag;
-    response.envelope.payload.set_matrix_symbol.symbol = symbol;
 
-    response.envelope.request_id = request->request_id;
-    response.envelope.source = request->source;
-    rc = ipc_publish(AppResponseEvent, response);
-    if (rc != 0) {
-        printk("hmi actor: failed to publish matrix response: %d\n", rc);
-    }
+    app_mgmt_respond(msg->transaction, rc, msg->value, NULL, 0U);
 }
