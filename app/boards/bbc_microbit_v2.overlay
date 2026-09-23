@@ -1,0 +1,16 @@
+&flash0 {
+	partitions {
+		/delete-node/ storage_partition;
+
+		/* Bluetooth bond settings. */
+		storage_partition: partition@7a000 {
+			label = "storage";
+			reg = <0x0007a000 0x00002000>;
+		};
+
+		littlefs_partition: partition@7c000 {
+			label = "littlefs";
+			reg = <0x0007c000 0x00004000>;
+		};
+	};
+};
