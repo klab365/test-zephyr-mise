@@ -21,7 +21,6 @@ async def run(args):
             while True:
                 request = app_protocol_pb2.RequestEnvelope(request_id=request_id)
                 request.get_logs.offset = offset
-                request.get_logs.max_entries = args.max_entries
 
                 response = await endpoint.request(
                     request_id, request.SerializeToString(), args.chunk_size, args.timeout
@@ -45,7 +44,10 @@ async def run(args):
                     )
                     file.write("\n")
 
-                print(f"received {len(logs.entries)} entries; next offset={logs.next_offset}")
+                print(
+                    f"received {len(logs.entries)} entries; next offset={logs.next_offset} "
+                    f"of {logs.total_entries} (page size={logs.page_size})"
+                )
                 if logs.final:
                     break
                 if logs.next_offset == offset:
@@ -61,7 +63,6 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Download paginated BLE demo logs.")
     parser.add_argument("--name", required=True, help="BLE device local name")
     parser.add_argument("--output", default="logs.jsonl", help="Destination JSON Lines file")
-    parser.add_argument("--max-entries", type=int, default=4, help="Entries requested per page")
     parser.add_argument("--request-id", type=int, default=1, help="Initial request correlation ID")
     parser.add_argument("--chunk-size", type=int, default=227, help="Max protobuf bytes per BLE chunk")
     parser.add_argument("--timeout", type=float, default=5.0, help="Request timeout in seconds")

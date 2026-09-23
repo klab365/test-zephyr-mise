@@ -13,6 +13,12 @@ static void pairing_confirm(struct bt_conn *conn)
     }
 }
 
+static void pairing_cancel(struct bt_conn *conn)
+{
+    ARG_UNUSED(conn);
+    printk("ble pairing: cancelled\n");
+}
+
 static void pairing_complete(struct bt_conn *conn, bool bonded)
 {
     ARG_UNUSED(conn);
@@ -26,6 +32,7 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 }
 
 static const struct bt_conn_auth_cb auth_callbacks = {
+    .cancel = pairing_cancel,
     .pairing_confirm = pairing_confirm,
 };
 

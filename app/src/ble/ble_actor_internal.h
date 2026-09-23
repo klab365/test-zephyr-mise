@@ -6,7 +6,7 @@
 
 #include "assets/proto/ble_transport.pb.h"
 
-#define BLE_ENDPOINT_MAX_PROTOBUF_SIZE 512U
+#define BLE_ENDPOINT_MAX_PROTOBUF_SIZE 1024U
 
 /* GATT write/notify payload: protobuf BleChunk bytes. */
 IPC_CMD_DEFINE_LOCAL(BleEndpointFrame, {

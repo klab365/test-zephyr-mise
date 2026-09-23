@@ -303,7 +303,7 @@ static void handle_chunk_frame(const BleEndpointFrame_payload_t *frame)
     reset_reassembly();
 }
 
-IPC_ACTOR_DEFINE(ble_actor, "ble", 2048, K_PRIO_PREEMPT(7), 8,
+IPC_ACTOR_DEFINE(ble_actor, "ble", 3072, K_PRIO_PREEMPT(7), 8,
                  IPC_MESSAGE_MAX(BleEndpointFrame, AppResponseEvent, LongPressEvent,
                                  BleRestartAdvertising));
 

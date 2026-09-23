@@ -4,11 +4,11 @@
 #include "app_events.h"
 
 #define DEMO_LOG_ENTRY_COUNT 100U
-#define DEMO_LOG_PAGE_SIZE 4U
+#define DEMO_LOG_PAGE_SIZE 8U
 #define DEMO_LOG_START_TIMESTAMP_MS 1710000000000ULL
 #define DEMO_LOG_INTERVAL_MS 1000U
 
-IPC_ACTOR_DEFINE(log_actor, "log", 1024, K_PRIO_PREEMPT(7), 2,
+IPC_ACTOR_DEFINE(log_actor, "log", 1536, K_PRIO_PREEMPT(7), 2,
                  IPC_MESSAGE_MAX(AppRequestEvent));
 
 IPC_ACTOR_HANDLE(log_actor, AppRequestEvent, on_app_request_event)
@@ -21,12 +21,8 @@ IPC_ACTOR_HANDLE(log_actor, AppRequestEvent, on_app_request_event)
         return;
     }
 
-    const GetLogsRequest *log_request = &request->payload.get_logs;
-    uint32_t offset = MIN(log_request->offset, DEMO_LOG_ENTRY_COUNT);
-    uint32_t requested = log_request->max_entries;
-    uint32_t count = MIN(requested == 0U ? DEMO_LOG_PAGE_SIZE : requested,
-                         DEMO_LOG_PAGE_SIZE);
-    count = MIN(count, DEMO_LOG_ENTRY_COUNT - offset);
+    uint32_t offset = MIN(request->payload.get_logs.offset, DEMO_LOG_ENTRY_COUNT);
+    uint32_t count = MIN(DEMO_LOG_PAGE_SIZE, DEMO_LOG_ENTRY_COUNT - offset);
 
     AppResponseEvent_payload_t response = {};
     GetLogsResponse *logs = &response.envelope.payload.get_logs;
@@ -35,6 +31,8 @@ IPC_ACTOR_HANDLE(log_actor, AppRequestEvent, on_app_request_event)
     response.envelope.source = request->source;
     response.envelope.which_payload = ResponseEnvelope_get_logs_tag;
     logs->entries_count = count;
+    logs->page_size = DEMO_LOG_PAGE_SIZE;
+    logs->total_entries = DEMO_LOG_ENTRY_COUNT;
     logs->next_offset = offset + count;
     logs->final = logs->next_offset == DEMO_LOG_ENTRY_COUNT;
 

@@ -87,11 +87,12 @@ message LogEntry {
 
 message GetLogsRequest {
   uint32 offset = 1;
-  uint32 max_entries = 2;
 }
 
 message GetLogsResponse {
   uint32 next_offset = 1;
   repeated LogEntry entries = 2;
   bool final = 3;
+  uint32 page_size = 4;
+  uint32 total_entries = 5;
 }
