@@ -1,4 +1,6 @@
 #include "ble_actor_internal.h"
+#include "ble_advertising.h"
+#include "ble_pairing.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -20,20 +22,13 @@
 #include "assets/proto/app_protocol.pb.h"
 #include "hmi.h"
 
-#define DEVICE_NAME CONFIG_BT_DEVICE_NAME
-#define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1U)
-#define ADVERTISING_TIMEOUT_10MS 3000U
-
 #define ENDPOINT_SVC_UUID_VAL \
     BT_UUID_128_ENCODE(0x7b5a0001, 0x4f1d, 0x4c8b, 0x8d4a, 0x5f4d7a123000)
 
 static struct bt_conn *current_conn;
 static bool notify_enabled;
 static bool bt_started;
-static bool advertising;
-static struct bt_le_ext_adv *adv;
 static uint32_t rx_message_id;
-static uint32_t rx_total_size;
 static uint16_t rx_len;
 static bool rx_active;
 static uint8_t rx_buf[BLE_ENDPOINT_MAX_PROTOBUF_SIZE];
@@ -44,116 +39,9 @@ static struct bt_uuid_128 endpoint_rx_uuid = BT_UUID_INIT_128(
 static struct bt_uuid_128 endpoint_tx_uuid = BT_UUID_INIT_128(
     BT_UUID_128_ENCODE(0x7b5a0003, 0x4f1d, 0x4c8b, 0x8d4a, 0x5f4d7a123000));
 
-static const BleAdvertisingData advertising_data = {
-    .appearance = CONFIG_BT_DEVICE_APPEARANCE,
-    .service_uuid128 = {
-        .size = 16U,
-        .bytes = { ENDPOINT_SVC_UUID_VAL },
-    },
-    .manufacturer_data = {
-        .size = 6U,
-        .bytes = {
-            0xff, 0xff, /* Company identifier. Replace with assigned company ID. */
-            0x01, 0x00, /* Firmware version: major, minor. */
-            0x01, 0x00, /* Hardware version: major, minor. */
-        },
-    },
-    .device_name = {
-        .size = DEVICE_NAME_LEN,
-        .bytes = DEVICE_NAME,
-    },
-};
-
-BUILD_ASSERT(DEVICE_NAME_LEN <= sizeof(((BleAdvertisingData *) 0)->device_name.bytes));
-
-static uint8_t advertising_appearance[2];
-static struct bt_data ad[4];
-
 IPC_CMD_DEFINE_LOCAL(BleRestartAdvertising, { });
 
 static void reset_reassembly(void);
-
-static void advertising_sent(struct bt_le_ext_adv *adv_set,
-                             struct bt_le_ext_adv_sent_info *info)
-{
-    ARG_UNUSED(adv_set);
-    ARG_UNUSED(info);
-
-    advertising = false;
-    printk("ble actor: advertising timed out\n");
-}
-
-static const struct bt_le_ext_adv_cb adv_cb = {
-    .sent = advertising_sent,
-};
-
-static void build_advertising_data(void)
-{
-    advertising_appearance[0] = advertising_data.appearance & 0xffU;
-    advertising_appearance[1] = (advertising_data.appearance >> 8) & 0xffU;
-
-    ad[0].type = BT_DATA_GAP_APPEARANCE;
-    ad[0].data_len = sizeof(advertising_appearance);
-    ad[0].data = advertising_appearance;
-
-    ad[1].type = BT_DATA_UUID128_ALL;
-    ad[1].data_len = advertising_data.service_uuid128.size;
-    ad[1].data = advertising_data.service_uuid128.bytes;
-
-    ad[2].type = BT_DATA_MANUFACTURER_DATA;
-    ad[2].data_len = advertising_data.manufacturer_data.size;
-    ad[2].data = advertising_data.manufacturer_data.bytes;
-
-    ad[3].type = BT_DATA_NAME_COMPLETE;
-    ad[3].data_len = advertising_data.device_name.size;
-    ad[3].data = advertising_data.device_name.bytes;
-}
-
-static int create_advertising_set(void)
-{
-    if (adv != NULL) {
-        return 0;
-    }
-
-    int rc = bt_le_ext_adv_create(BT_LE_EXT_ADV_CONN, &adv_cb, &adv);
-    if (rc != 0) {
-        printk("ble actor: failed to create advertising set: %d\n", rc);
-        return rc;
-    }
-
-    build_advertising_data();
-
-    rc = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), NULL, 0);
-    if (rc != 0) {
-        printk("ble actor: failed to set advertising data: %d\n", rc);
-        return rc;
-    }
-
-    return 0;
-}
-
-static int start_advertising(void)
-{
-    if (advertising) {
-        return 0;
-    }
-
-    int rc = create_advertising_set();
-    if (rc != 0) {
-        return rc;
-    }
-
-    rc = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_PARAM(ADVERTISING_TIMEOUT_10MS, 0));
-    if (rc != 0) {
-        printk("ble actor: advertising failed: %d\n", rc);
-        return rc;
-    }
-
-    advertising = true;
-
-    printk("ble actor: advertising as %s\n", DEVICE_NAME);
-    return 0;
-}
 
 static void start_ble(void)
 {
@@ -164,10 +52,15 @@ static void start_ble(void)
             return;
         }
 
+        int settings_rc = ble_pairing_init();
+        if (settings_rc != 0) {
+            printk("ble actor: pairing initialization failed: %d\n", settings_rc);
+            return;
+        }
         bt_started = true;
     }
 
-    int rc = start_advertising();
+    int rc = ble_advertising_start();
     if (rc != 0) {
         return;
     }
@@ -216,10 +109,11 @@ BT_GATT_SERVICE_DEFINE(endpoint_svc,
     BT_GATT_PRIMARY_SERVICE(&endpoint_svc_uuid),
     BT_GATT_CHARACTERISTIC(&endpoint_rx_uuid.uuid,
         BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-        BT_GATT_PERM_WRITE, NULL, endpoint_write, NULL),
+        BT_GATT_PERM_WRITE_ENCRYPT, NULL, endpoint_write, NULL),
     BT_GATT_CHARACTERISTIC(&endpoint_tx_uuid.uuid,
         BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_NONE, NULL, NULL, NULL),
-    BT_GATT_CCC(endpoint_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE));
+    BT_GATT_CCC(endpoint_ccc_changed,
+                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT));
 
 static void connected(struct bt_conn *conn, uint8_t err)
 {
@@ -229,7 +123,10 @@ static void connected(struct bt_conn *conn, uint8_t err)
     }
 
     current_conn = bt_conn_ref(conn);
-    advertising = false;
+    int rc = ble_pairing_request_security(conn);
+    if (rc != 0) {
+        printk("ble actor: failed to request security: %d\n", rc);
+    }
     printk("ble actor: connected\n");
 }
 
@@ -258,7 +155,7 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 };
 
 static int notify_chunk(uint32_t message_id, uint32_t offset, const uint8_t *data,
-                        uint16_t len, uint32_t total_size, bool final)
+                        uint16_t len, bool final)
 {
     uint8_t tx_buf[sizeof(BleChunk)];
     uint16_t mtu_payload;
@@ -274,7 +171,6 @@ static int notify_chunk(uint32_t message_id, uint32_t offset, const uint8_t *dat
 
     chunk.message_id = message_id;
     chunk.offset = offset;
-    chunk.total_size = total_size;
     chunk.data.size = len;
     chunk.final = final;
     memcpy(chunk.data.bytes, data, len);
@@ -307,7 +203,7 @@ static int notify_protobuf_response(const uint8_t *protobuf, uint16_t len)
         int rc;
 
         do {
-            rc = notify_chunk(message_id, offset, &protobuf[offset], chunk_len, len,
+            rc = notify_chunk(message_id, offset, &protobuf[offset], chunk_len,
                               (offset + chunk_len) == len);
             if (rc != -EMSGSIZE || chunk_len == 1U) {
                 break;
@@ -348,7 +244,6 @@ static void reset_reassembly(void)
 {
     rx_active = false;
     rx_message_id = 0U;
-    rx_total_size = 0U;
     rx_len = 0U;
 }
 
@@ -363,11 +258,9 @@ static void handle_chunk_frame(const BleEndpointFrame_payload_t *frame)
         return;
     }
 
-    if (chunk.total_size == 0U || chunk.total_size > sizeof(rx_buf) ||
-        chunk.data.size > sizeof(chunk.data.bytes) ||
-        (chunk.offset + chunk.data.size) > chunk.total_size) {
-        printk("ble actor: invalid chunk message_id=%u offset=%u total=%u data=%u\n",
-               chunk.message_id, chunk.offset, chunk.total_size, chunk.data.size);
+    if (chunk.data.size > sizeof(chunk.data.bytes)) {
+        printk("ble actor: invalid chunk message_id=%u offset=%u data=%u\n",
+               chunk.message_id, chunk.offset, chunk.data.size);
         reset_reassembly();
         return;
     }
@@ -382,13 +275,18 @@ static void handle_chunk_frame(const BleEndpointFrame_payload_t *frame)
 
         rx_active = true;
         rx_message_id = chunk.message_id;
-        rx_total_size = chunk.total_size;
         rx_len = 0U;
     }
 
-    if (chunk.total_size != rx_total_size || chunk.offset != rx_len) {
+    if (chunk.offset != rx_len) {
         printk("ble actor: unexpected chunk message_id=%u offset=%u expected=%u\n",
                chunk.message_id, chunk.offset, rx_len);
+        reset_reassembly();
+        return;
+    }
+
+    if (chunk.data.size > sizeof(rx_buf) - rx_len) {
+        printk("ble actor: message exceeds reassembly buffer\n");
         reset_reassembly();
         return;
     }
@@ -397,12 +295,6 @@ static void handle_chunk_frame(const BleEndpointFrame_payload_t *frame)
     rx_len += chunk.data.size;
 
     if (!chunk.final) {
-        return;
-    }
-
-    if (rx_len != rx_total_size) {
-        printk("ble actor: final chunk before complete len=%u total=%u\n", rx_len, rx_total_size);
-        reset_reassembly();
         return;
     }
 
@@ -470,7 +362,7 @@ IPC_ACTOR_HANDLE(ble_actor, BleRestartAdvertising, on_restart_advertising)
     (void) msg;
     ARG_UNUSED(raw_msg);
 
-    int rc = start_advertising();
+    int rc = ble_advertising_start();
     if (rc != 0) {
         printk("ble actor: advertising restart failed: %d\n", rc);
     }

@@ -74,8 +74,11 @@ class BleEndpointClient:
         chunk = ble_transport_pb2.BleChunk()
         chunk.ParseFromString(bytes(data))
 
-        chunks = self.response_chunks.setdefault(chunk.message_id, bytearray(chunk.total_size))
-        chunks[chunk.offset : chunk.offset + len(chunk.data)] = chunk.data
+        chunks = self.response_chunks.setdefault(chunk.message_id, bytearray())
+        if chunk.offset != len(chunks):
+            self.response_chunks.pop(chunk.message_id, None)
+            raise RuntimeError(f"unexpected response chunk offset: {chunk.offset}")
+        chunks.extend(chunk.data)
 
         if not chunk.final:
             return
@@ -90,23 +93,32 @@ class BleEndpointClient:
 
     async def write_chunked(self, message_id: int, payload: bytes, max_payload_size: int):
         offset = 0
+        att_payload = self.mtu_size - 3 if self.mtu_size is not None else None
+
         while offset < len(payload):
-            chunk = ble_transport_pb2.BleChunk(
-                message_id=message_id,
-                offset=offset,
-                total_size=len(payload),
-                data=payload[offset : offset + max_payload_size],
-                final=(offset + max_payload_size) >= len(payload),
-            )
-            chunk_bytes = chunk.SerializeToString()
-            if self.mtu_size is not None and len(chunk_bytes) > (self.mtu_size - 3):
-                raise RuntimeError(
-                    f"encoded chunk is {len(chunk_bytes)} bytes, larger than ATT payload "
-                    f"{self.mtu_size - 3}"
+            upper_bound = min(max_payload_size, len(payload) - offset)
+            low, high, chunk_bytes = 1, upper_bound, None
+
+            while low <= high:
+                length = (low + high) // 2
+                chunk = ble_transport_pb2.BleChunk(
+                    message_id=message_id,
+                    offset=offset,
+                    data=payload[offset : offset + length],
+                    final=(offset + length) == len(payload),
                 )
+                encoded = chunk.SerializeToString()
+                if att_payload is None or len(encoded) <= att_payload:
+                    chunk_bytes = encoded
+                    low = length + 1
+                else:
+                    high = length - 1
+
+            if chunk_bytes is None:
+                raise RuntimeError("negotiated ATT payload is too small for a BleChunk")
 
             await self.client.write_gatt_char(RX_UUID, chunk_bytes, response=True)
-            offset += len(chunk.data)
+            offset += low - 1
 
     async def request(self, request_id: int, payload: bytes, chunk_size: int, timeout: float):
         if request_id in self.response_futures:
@@ -133,7 +145,7 @@ class BleEndpointClient:
 @asynccontextmanager
 async def connected_endpoint(name: str):
     device = await find_device(name)
-    async with BleakClient(device) as client:
+    async with BleakClient(device, pair=True) as client:
         endpoint = BleEndpointClient(client)
         get_services = getattr(client, "get_services", None)
         services = await get_services() if get_services is not None else client.services

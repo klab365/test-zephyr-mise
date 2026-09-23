@@ -1,4 +1,3 @@
-BleChunk.data max_size:128
-BleAdvertisingData.service_uuid128 max_size:16
-BleAdvertisingData.manufacturer_data max_size:6
-BleAdvertisingData.device_name max_size:32
+# At ATT MTU 247, the 244-byte ATT payload leaves 17 bytes for the
+# worst-case protobuf encoding of BleChunk's metadata.
+BleChunk.data max_size:227

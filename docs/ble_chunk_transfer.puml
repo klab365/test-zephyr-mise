@@ -1,0 +1,49 @@
+@startuml
+actor Client
+participant "BLE GATT RX" as Rx
+participant "ble_actor" as Ble
+participant "file_actor" as File
+participant "BLE GATT TX" as Tx
+
+== Datei-Block anfordern ==
+
+Client -> Client: FileReadRequest(offset=0)\nals RequestEnvelope kodieren
+Client -> Client: In BleChunk(s) fragmentieren\nmessage_id, offset, data, final
+Client -> Rx: GATT Write: serialisiertes BleChunk
+Rx -> Ble: BleEndpointFrame (IPC)
+
+Ble -> Ble: BleChunk dekodieren\nDaten bei rx_buf[offset] ablegen
+alt Weitere Fragmente erwartet
+  Ble -> Ble: Auf nächsten BleChunk warten
+else final == true
+  Ble -> Ble: Vollständiges RequestEnvelope dekodieren
+  Ble -> File: AppRequestEvent
+end
+
+== Datei-Block antworten ==
+
+File -> File: Maximal 256 Dummy-Bytes erzeugen
+File -> Ble: AppResponseEvent\nFileDataResponse(offset, data, final)
+
+Ble -> Ble: ResponseEnvelope serialisieren
+loop Pro BLE-Fragment
+  Ble -> Ble: Bis zu 128 Response-Bytes nehmen
+  Ble -> Ble: BleChunk erzeugen:\nmessage_id, offset, data, final
+  Ble -> Tx: bt_gatt_notify(serialisiertes BleChunk)
+  Tx -> Client: BLE Notification
+end
+
+Client -> Client: BleChunks über offset zusammensetzen
+Client -> Client: Vollständiges FileDataResponse dekodieren
+
+note right of Client
+BleChunk.final:
+letztes Fragment einer
+Protobuf-Nachricht
+end note
+
+note right of File
+FileDataResponse.final:
+letzter Block der Datei
+end note
+@enduml

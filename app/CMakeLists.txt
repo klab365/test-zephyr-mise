@@ -11,6 +11,8 @@ target_sources(app PRIVATE
   src/app_events.c
   src/echo_actor.c
   src/ping_actor.c
+  src/file_actor.c
+  src/log_actor.c
 )
 
 target_include_directories(app PRIVATE

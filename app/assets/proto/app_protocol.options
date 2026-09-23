@@ -1,2 +1,6 @@
 EchoRequest.payload max_size:64
 EchoResponse.payload max_size:64
+FileDataResponse.data max_size:256
+LogEntry.level max_size:8
+LogEntry.message max_size:64
+GetLogsResponse.entries max_count:4

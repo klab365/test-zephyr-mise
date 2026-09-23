@@ -35,7 +35,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Send a PingRequest over BLE.")
     parser.add_argument("--name", required=True, help="BLE device local name")
     parser.add_argument("--count", type=int, default=5, help="Number of ping requests to send")
-    parser.add_argument("--chunk-size", type=int, default=128, help="Max protobuf bytes per BLE chunk")
+    parser.add_argument("--chunk-size", type=int, default=227, help="Max protobuf bytes per BLE chunk")
     parser.add_argument("--request-id", type=int, default=1, help="Initial request correlation ID")
     parser.add_argument("--sequence", type=int, default=1, help="Initial ping sequence")
     parser.add_argument("--timeout", type=float, default=5.0, help="Response timeout in seconds")
