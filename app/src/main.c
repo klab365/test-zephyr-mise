@@ -5,11 +5,19 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
 
+#include "storage.h"
+
 int main(void)
 {
 	printk("Example actor app\n");
 
-	int rc = ipc_start_all_actors();
+	int rc = storage_init();
+	if (rc != 0) {
+		printk("storage initialization failed: %d\n", rc);
+		return rc;
+	}
+
+	rc = ipc_start_all_actors();
 	if (rc != 0) {
 		printk("actors start failed: %d\n", rc);
 		return rc;

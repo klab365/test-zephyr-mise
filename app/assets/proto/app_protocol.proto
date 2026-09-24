@@ -23,7 +23,10 @@ message RequestEnvelope {
     PingRequest ping = 4;
     SetMatrixSymbolRequest set_matrix_symbol = 5;
     FileReadRequest file_read = 6;
-    GetLogsRequest get_logs = 7;
+    NewLogFileRequest new_log_file = 8;
+    StartMeasurementRequest start_measurement = 9;
+    StopMeasurementRequest stop_measurement = 10;
+    GetMeasurementCurveRequest get_measurement_curve = 11;
   }
 }
 
@@ -35,7 +38,10 @@ message ResponseEnvelope {
     PingResponse ping = 4;
     SetMatrixSymbolResponse set_matrix_symbol = 5;
     FileDataResponse file_data = 6;
-    GetLogsResponse get_logs = 7;
+    NewLogFileResponse new_log_file = 8;
+    StartMeasurementResponse start_measurement = 9;
+    StopMeasurementResponse stop_measurement = 10;
+    GetMeasurementCurveResponse get_measurement_curve = 11;
   }
 }
 
@@ -63,19 +69,71 @@ message SetMatrixSymbolResponse {
   MatrixSymbol symbol = 1;
 }
 
-/* Requests one bounded block from the demo file. */
+/* Requests one bounded block from a stored file. */
 message FileReadRequest {
+  string file_id = 1;
+  uint32 transfer_id = 2;
+  uint32 offset = 3;
+  uint32 max_bytes = 4;
+}
+
+message FileDataResponse {
+  string file_id = 1;
+  uint32 transfer_id = 2;
+  uint32 offset = 3;
+  bytes data = 4;
+  bool final = 5;
+}
+
+message NewLogFileRequest {}
+
+message NewLogFileResponse {
+  string file_id = 1;
+}
+
+/* Starts a new acquisition. Any existing curve_1.bin is replaced. */
+message StartMeasurementRequest {}
+
+message StartMeasurementResponse {
+  string file_id = 1;
+}
+
+/* Stops acquisition and returns the CRC-32/IEEE of the complete curve file. */
+message StopMeasurementRequest {}
+
+message StopMeasurementResponse {
+  string file_id = 1;
+  uint32 crc32 = 2;
+}
+
+/* Downloads the serialized MeasurementCurve in bounded response blocks. */
+message GetMeasurementCurveRequest {
   uint32 transfer_id = 1;
   uint32 offset = 2;
   uint32 max_bytes = 3;
 }
 
-/* A file block. BLE transport fragments this message as needed. */
-message FileDataResponse {
+message GetMeasurementCurveResponse {
   uint32 transfer_id = 1;
   uint32 offset = 2;
   bytes data = 3;
   bool final = 4;
+}
+
+/* One generated sample, persisted as a length-prefixed protobuf record. */
+message Measurement {
+  uint32 sequence = 1;
+  int32 value = 3;
+}
+
+/* A complete curve. The encoded message is capped at 1 KiB. crc32 is CRC-32/IEEE
+ * over concatenated serialized Measurement messages, in measurements order. */
+message MeasurementCurve {
+  string id = 1;
+  uint64 started_timestamp_ms = 2;
+  repeated Measurement measurements = 3;
+  uint32 count = 4;
+  uint32 crc32 = 5;
 }
 
 message LogEntry {
@@ -85,14 +143,3 @@ message LogEntry {
   string message = 4;
 }
 
-message GetLogsRequest {
-  uint32 offset = 1;
-}
-
-message GetLogsResponse {
-  uint32 next_offset = 1;
-  repeated LogEntry entries = 2;
-  bool final = 3;
-  uint32 page_size = 4;
-  uint32 total_entries = 5;
-}

@@ -2,3 +2,4 @@
 
 IPC_EVENT_DEFINE(AppRequestEvent);
 IPC_EVENT_DEFINE(AppResponseEvent);
+IPC_EVENT_DEFINE(LogAppendEvent);

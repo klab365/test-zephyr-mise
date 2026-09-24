@@ -1,111 +1,81 @@
-#include <errno.h>
 #include <string.h>
 
-#include <pb_decode.h>
 #include <pb_encode.h>
-#include <zephyr/fs/fs.h>
-#include <zephyr/fs/littlefs.h>
 #include <zephyr/kernel.h>
-#include <zephyr/storage/flash_map.h>
 #include <zephyr/sys/printk.h>
 
 #include "app_events.h"
+#include "storage.h"
 
-#define DEMO_LOG_ENTRY_COUNT 1000U
-#define DEMO_LOG_PAGE_SIZE 8U
+#define LOG_FILE_ID "logs"
 #define LOG_PATH "/lfs/logs.bin"
+#define FILE_BLOCK_SIZE 256U
 
-FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(log_storage);
-static struct fs_mount_t log_mount = {
-    .type = FS_LITTLEFS,
-    .fs_data = &log_storage,
-    .storage_dev = (void *)FIXED_PARTITION_ID(littlefs_partition),
-    .mnt_point = "/lfs",
-};
-static bool storage_ready;
-
-static int write_dummy_logs(void)
+static size_t encode_varint(uint8_t *encoded, size_t value)
 {
-    struct fs_file_t file;
+    size_t len = 0;
+    do {
+        encoded[len] = value & 0x7fU;
+        value >>= 7U;
+        if (value != 0U) encoded[len] |= 0x80U;
+        ++len;
+    } while (value != 0U);
+    return len;
+}
+
+static void publish_file(const RequestEnvelope *request)
+{
+    uint8_t data[FILE_BLOCK_SIZE];
+    size_t read = 0;
+    uint16_t wanted = MIN(request->payload.file_read.max_bytes ?
+                          request->payload.file_read.max_bytes : FILE_BLOCK_SIZE, FILE_BLOCK_SIZE);
+    if (storage_read(LOG_PATH, request->payload.file_read.offset, data, wanted, &read) != 0) return;
+
+    AppResponseEvent_payload_t response = {};
+    FileDataResponse *file = &response.envelope.payload.file_data;
+    response.envelope.request_id = request->request_id;
+    response.envelope.source = request->source;
+    response.envelope.which_payload = ResponseEnvelope_file_data_tag;
+    strcpy(file->file_id, LOG_FILE_ID);
+    file->transfer_id = request->payload.file_read.transfer_id;
+    file->offset = request->payload.file_read.offset;
+    file->data.size = read;
+    memcpy(file->data.bytes, data, read);
+    file->final = read < wanted;
+    (void)ipc_publish(AppResponseEvent, response);
+}
+
+IPC_ACTOR_DEFINE(log_actor, "log", 1024, K_PRIO_PREEMPT(7), 4,
+                 IPC_MESSAGE_MAX(AppRequestEvent, LogAppendEvent));
+
+IPC_ACTOR_HANDLE(log_actor, LogAppendEvent, on_log_append)
+{
+    ARG_UNUSED(self); ARG_UNUSED(raw_msg);
     uint8_t encoded[LogEntry_size];
-
-    fs_file_t_init(&file);
-    int rc = fs_open(&file, LOG_PATH, FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
-    if (rc != 0) return rc;
-    for (uint32_t sequence = 0U; sequence < DEMO_LOG_ENTRY_COUNT; ++sequence) {
-        LogEntry entry = LogEntry_init_zero;
-        pb_ostream_t stream = pb_ostream_from_buffer(encoded, sizeof(encoded));
-        entry.sequence = sequence;
-        entry.timestamp_ms = 1710000000000ULL + ((uint64_t)sequence * 1000U);
-        snprintk(entry.level, sizeof(entry.level), "%s", sequence % 10U ? "INFO" : "WARN");
-        snprintk(entry.message, sizeof(entry.message), "Dummy log entry %u", sequence);
-        if (!pb_encode(&stream, LogEntry_fields, &entry) || stream.bytes_written > UINT16_MAX) {
-            rc = -EINVAL; break;
-        }
-        uint16_t length = stream.bytes_written;
-        if (fs_write(&file, &length, sizeof(length)) != sizeof(length) ||
-            fs_write(&file, encoded, length) != length) { rc = -EIO; break; }
+    uint8_t record[LogEntry_size + (sizeof(size_t) * 8U + 6U) / 7U];
+    pb_ostream_t stream = pb_ostream_from_buffer(encoded, sizeof(encoded));
+    if (!pb_encode(&stream, LogEntry_fields, &msg->entry)) return;
+    size_t length_size = encode_varint(record, stream.bytes_written);
+    memcpy(record + length_size, encoded, stream.bytes_written);
+    if (storage_append(LOG_PATH, record, length_size + stream.bytes_written) != 0) {
+        printk("log actor: failed to append log entry\n");
     }
-    fs_close(&file);
-    return rc;
 }
 
-static int init_storage(void)
-{
-    int rc = fs_mount(&log_mount);
-    if (rc != 0) {
-        rc = fs_mkfs(FS_LITTLEFS, (uintptr_t)log_mount.storage_dev, NULL, 0);
-        if (rc != 0) return rc;
-        rc = fs_mount(&log_mount);
-        if (rc != 0) return rc;
-    }
-    struct fs_dirent entry;
-    rc = fs_stat(LOG_PATH, &entry);
-    if (rc == -ENOENT) rc = write_dummy_logs();
-    return rc;
-}
-
-static int read_entry(struct fs_file_t *file, LogEntry *entry)
-{
-    uint16_t length;
-    uint8_t encoded[LogEntry_size];
-    if (fs_read(file, &length, sizeof(length)) != sizeof(length) || length > sizeof(encoded) ||
-        fs_read(file, encoded, length) != length) return -EIO;
-    pb_istream_t stream = pb_istream_from_buffer(encoded, length);
-    return pb_decode(&stream, LogEntry_fields, entry) ? 0 : -EINVAL;
-}
-
-IPC_ACTOR_DEFINE(log_actor, "log", 1536, K_PRIO_PREEMPT(7), 2, IPC_MESSAGE_MAX(AppRequestEvent));
-
-IPC_START_HOOK(log_actor, on_log_start)
-{
-    ARG_UNUSED(self);
-    int rc = init_storage();
-    storage_ready = rc == 0;
-    printk("log actor: storage %s (%d)\n", storage_ready ? "ready" : "failed", rc);
-}
-
-IPC_ACTOR_HANDLE(log_actor, AppRequestEvent, on_app_request_event)
+IPC_ACTOR_HANDLE(log_actor, AppRequestEvent, on_log_request)
 {
     ARG_UNUSED(self); ARG_UNUSED(raw_msg);
     const RequestEnvelope *request = &msg->envelope;
-    if (!storage_ready || request->which_payload != RequestEnvelope_get_logs_tag) return;
-    uint32_t offset = MIN(request->payload.get_logs.offset, DEMO_LOG_ENTRY_COUNT);
-    uint32_t count = MIN(DEMO_LOG_PAGE_SIZE, DEMO_LOG_ENTRY_COUNT - offset);
-    struct fs_file_t file; fs_file_t_init(&file);
-    if (fs_open(&file, LOG_PATH, FS_O_READ) != 0) return;
-    LogEntry discard;
-    for (uint32_t i = 0; i < offset && read_entry(&file, &discard) == 0; ++i) {}
-    AppResponseEvent_payload_t response = {};
-    GetLogsResponse *logs = &response.envelope.payload.get_logs;
-    response.envelope.request_id = request->request_id; response.envelope.source = request->source;
-    response.envelope.which_payload = ResponseEnvelope_get_logs_tag;
-    logs->page_size = DEMO_LOG_PAGE_SIZE; logs->total_entries = DEMO_LOG_ENTRY_COUNT;
-    for (; logs->entries_count < count; ++logs->entries_count) {
-        if (read_entry(&file, &logs->entries[logs->entries_count]) != 0) break;
+    if (request->which_payload == RequestEnvelope_new_log_file_tag) {
+        if (storage_reset(LOG_PATH) != 0) return;
+        AppResponseEvent_payload_t response = {};
+        response.envelope.request_id = request->request_id;
+        response.envelope.source = request->source;
+        response.envelope.which_payload = ResponseEnvelope_new_log_file_tag;
+        strcpy(response.envelope.payload.new_log_file.file_id, LOG_FILE_ID);
+        (void)ipc_publish(AppResponseEvent, response);
+    } else if (request->which_payload == RequestEnvelope_file_read_tag &&
+               strcmp(request->payload.file_read.file_id, LOG_FILE_ID) == 0) {
+        publish_file(request);
     }
-    fs_close(&file);
-    logs->next_offset = offset + logs->entries_count;
-    logs->final = logs->next_offset == DEMO_LOG_ENTRY_COUNT;
-    (void)ipc_publish(AppResponseEvent, response);
 }
