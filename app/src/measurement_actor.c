@@ -31,21 +31,44 @@ static void schedule_tick(uint32_t session_id)
     (void)ipc_send_after(MeasurementTick, 1000U, tick);
 }
 
-/* The curve CRC covers only the measurement data, not mutable curve metadata. */
+static size_t encode_varint(uint8_t *encoded, size_t value)
+{
+    size_t len = 0;
+    do {
+        encoded[len] = value & 0x7fU;
+        value >>= 7U;
+        if (value != 0U) encoded[len] |= 0x80U;
+        ++len;
+    } while (value != 0U);
+    return len;
+}
+
+static bool append_measurement(const Measurement *measurement)
+{
+    uint8_t encoded[Measurement_size];
+    uint8_t length[(sizeof(size_t) * 8U + 6U) / 7U];
+    pb_ostream_t stream = pb_ostream_from_buffer(encoded, sizeof(encoded));
+    if (!pb_encode(&stream, Measurement_fields, measurement)) return false;
+    size_t length_size = encode_varint(length, stream.bytes_written);
+    if (curve.measurement_records.size + length_size + stream.bytes_written >
+        sizeof(curve.measurement_records.bytes)) return false;
+
+    memcpy(&curve.measurement_records.bytes[curve.measurement_records.size], length, length_size);
+    curve.measurement_records.size += length_size;
+    memcpy(&curve.measurement_records.bytes[curve.measurement_records.size], encoded,
+           stream.bytes_written);
+    curve.measurement_records.size += stream.bytes_written;
+    ++curve.count;
+    return true;
+}
+
+/* The CRC covers the complete serialized MeasurementCurve; its trailer is excluded. */
 static bool serialize_curve(uint32_t *crc, uint16_t *size)
 {
-    uint8_t encoded_measurement[Measurement_size];
-    *crc = 0;
-    for (pb_size_t i = 0; i < curve.measurements_count; ++i) {
-        pb_ostream_t measurement_stream =
-            pb_ostream_from_buffer(encoded_measurement, sizeof(encoded_measurement));
-        if (!pb_encode(&measurement_stream, Measurement_fields, &curve.measurements[i])) return false;
-        *crc = crc32_ieee_update(*crc, encoded_measurement, measurement_stream.bytes_written);
-    }
-
     pb_ostream_t stream = pb_ostream_from_buffer(encoded_curve, sizeof(encoded_curve));
     if (!pb_encode(&stream, MeasurementCurve_fields, &curve)) return false;
     *size = stream.bytes_written;
+    *crc = crc32_ieee(encoded_curve, *size);
     return true;
 }
 
@@ -92,7 +115,6 @@ IPC_ACTOR_HANDLE(measurement_actor, AppRequestEvent, on_measurement_request)
         active_session = ++next_session;
         acquisition_active = false;
         curve = (MeasurementCurve){};
-        strcpy(curve.id, CURVE_FILE_ID);
         curve.started_timestamp_ms = k_uptime_get();
         int rc = storage_reset(CURVE_PATH);
         if (rc != 0) {
@@ -110,7 +132,6 @@ IPC_ACTOR_HANDLE(measurement_actor, AppRequestEvent, on_measurement_request)
         (void)ipc_publish(AppResponseEvent, response);
     } else if (request->which_payload == RequestEnvelope_stop_measurement_tag) {
         acquisition_active = false;
-        curve.count = curve.measurements_count;
         uint32_t crc;
         uint16_t size;
         if (!serialize_curve(&crc, &size)) {
@@ -143,13 +164,14 @@ IPC_ACTOR_HANDLE(measurement_actor, MeasurementTick, on_measurement_tick)
 {
     ARG_UNUSED(self); ARG_UNUSED(raw_msg);
     if (!acquisition_active || msg->session_id != active_session) return;
-    if (curve.measurements_count == ARRAY_SIZE(curve.measurements)) {
+    Measurement measurement = {
+        .temperature = 2000U + curve.count,
+        .humidity = 5000U + curve.count,
+    };
+    if (!append_measurement(&measurement)) {
         acquisition_active = false;
         printk("measurement actor: curve reached its 1 KiB capacity\n");
         return;
     }
-    Measurement *measurement = &curve.measurements[curve.measurements_count++];
-    measurement->value = curve.measurements_count - 1U;
-    curve.count = curve.measurements_count;
     schedule_tick(active_session);
 }

@@ -7,7 +7,6 @@ NewLogFileResponse.file_id max_size:16
 StartMeasurementResponse.file_id max_size:16
 StopMeasurementResponse.file_id max_size:16
 GetMeasurementCurveResponse.data max_size:512
-MeasurementCurve.id max_size:16
-MeasurementCurve.measurements max_count:123
+MeasurementCurve.measurement_records max_size:1000
 LogEntry.level max_size:8
 LogEntry.message max_size:64

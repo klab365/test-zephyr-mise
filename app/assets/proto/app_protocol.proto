@@ -118,18 +118,17 @@ message GetMeasurementCurveResponse {
   bool final = 4;
 }
 
-/* One generated sample, persisted as a length-prefixed protobuf record. */
 message Measurement {
-  uint32 value = 1;
+  uint32 temperature = 1;
+  uint32 humidity = 2;
 }
 
-/* A complete curve. The encoded message is capped at 1 KiB. The file stores
- * its measurement-data CRC-32/IEEE as a separate four-byte trailer. */
+/* A complete curve. measurement_records contains length-prefixed serialized
+ * Measurement messages. The file stores a separate four-byte CRC-32 trailer. */
 message MeasurementCurve {
-  string id = 1;
-  uint64 started_timestamp_ms = 2;
-  repeated Measurement measurements = 3;
-  uint32 count = 4;
+  uint64 started_timestamp_ms = 1;
+  uint32 count = 2;
+  bytes measurement_records = 3;
 }
 
 message LogEntry {
