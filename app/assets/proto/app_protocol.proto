@@ -103,14 +103,12 @@ message StopMeasurementRequest {}
 
 message StopMeasurementResponse {
   string file_id = 1;
-  uint32 crc32 = 2;
 }
 
 /* Downloads the serialized MeasurementCurve in bounded response blocks. */
 message GetMeasurementCurveRequest {
   uint32 transfer_id = 1;
   uint32 offset = 2;
-  uint32 max_bytes = 3;
 }
 
 message GetMeasurementCurveResponse {
@@ -122,18 +120,16 @@ message GetMeasurementCurveResponse {
 
 /* One generated sample, persisted as a length-prefixed protobuf record. */
 message Measurement {
-  uint32 sequence = 1;
-  int32 value = 3;
+  uint32 value = 1;
 }
 
-/* A complete curve. The encoded message is capped at 1 KiB. crc32 is CRC-32/IEEE
- * over concatenated serialized Measurement messages, in measurements order. */
+/* A complete curve. The encoded message is capped at 1 KiB. The file stores
+ * its measurement-data CRC-32/IEEE as a separate four-byte trailer. */
 message MeasurementCurve {
   string id = 1;
   uint64 started_timestamp_ms = 2;
   repeated Measurement measurements = 3;
   uint32 count = 4;
-  uint32 crc32 = 5;
 }
 
 message LogEntry {

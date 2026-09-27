@@ -35,8 +35,7 @@ async def run(args):
         response = await request(endpoint, request_id, stop, args)
         if response.WhichOneof("payload") != "stop_measurement":
             raise RuntimeError("expected StopMeasurementResponse")
-        expected_crc = response.stop_measurement.crc32
-        print(f"stopped {response.stop_measurement.file_id}, crc32=0x{expected_crc:08x}")
+        print(f"stopped {response.stop_measurement.file_id}")
 
         encoded_curve = bytearray()
         offset = 0
@@ -45,7 +44,6 @@ async def run(args):
             download = app_protocol_pb2.RequestEnvelope(request_id=request_id)
             download.get_measurement_curve.transfer_id = args.transfer_id
             download.get_measurement_curve.offset = offset
-            download.get_measurement_curve.max_bytes = args.block_size
             response = await request(endpoint, request_id, download, args)
             if response.WhichOneof("payload") != "get_measurement_curve":
                 raise RuntimeError("expected GetMeasurementCurveResponse")
@@ -60,17 +58,19 @@ async def run(args):
                 break
             request_id += 1
 
+    print(f"download complete: {len(encoded_curve)} bytes")
+    if len(encoded_curve) < 4:
+        raise RuntimeError("downloaded curve has no CRC trailer")
+    stored_crc = int.from_bytes(encoded_curve[-4:], byteorder="little")
     curve = app_protocol_pb2.MeasurementCurve()
-    curve.ParseFromString(encoded_curve)
-    stored_crc = curve.crc32
+    curve.ParseFromString(encoded_curve[:-4])
     calculated_crc = 0
     for measurement in curve.measurements:
         calculated_crc = zlib.crc32(measurement.SerializeToString(), calculated_crc)
     calculated_crc &= 0xFFFFFFFF
-    if stored_crc != expected_crc or calculated_crc != expected_crc:
+    if calculated_crc != stored_crc:
         raise RuntimeError(
-            f"CRC mismatch: stop=0x{expected_crc:08x}, stored=0x{stored_crc:08x}, "
-            f"calculated=0x{calculated_crc:08x}"
+            f"CRC mismatch: stored=0x{stored_crc:08x}, calculated=0x{calculated_crc:08x}"
         )
     if curve.count != len(curve.measurements):
         raise RuntimeError("curve count does not match measurement count")
@@ -79,9 +79,9 @@ async def run(args):
         "id": curve.id,
         "started_timestamp_ms": curve.started_timestamp_ms,
         "count": curve.count,
-        "crc32": f"0x{curve.crc32:08x}",
+        "crc32": f"0x{stored_crc:08x}",
         "measurements": [
-            {"sequence": measurement.sequence, "value": measurement.value}
+            {"value": measurement.value}
             for measurement in curve.measurements
         ],
     }
@@ -93,10 +93,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Acquire and download a measurement curve.")
     parser.add_argument("--name", required=True, help="BLE device local name")
     parser.add_argument("--output", default="measurement_curve.json", help="JSON destination")
-    parser.add_argument("--duration", type=float, default=5.0, help="Acquisition duration in seconds")
+    parser.add_argument("--duration", type=float, default=120.0, help="Acquisition duration in seconds")
     parser.add_argument("--transfer-id", type=int, default=1, help="Download transfer ID")
     parser.add_argument("--request-id", type=int, default=1, help="Initial request correlation ID")
-    parser.add_argument("--block-size", type=int, default=128, help="Requested bytes per block")
     parser.add_argument("--chunk-size", type=int, default=227, help="Max protobuf bytes per BLE chunk")
     parser.add_argument("--timeout", type=float, default=5.0, help="Request timeout in seconds")
     return parser.parse_args()

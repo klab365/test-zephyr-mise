@@ -3,6 +3,7 @@
 #include <pb_encode.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/crc.h>
+#include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/printk.h>
 
 #include "app_events.h"
@@ -10,15 +11,17 @@
 
 #define CURVE_FILE_ID "curve_1"
 #define CURVE_PATH "/lfs/curve_1.bin"
-/* Keeps a GetMeasurementCurveResponse within one negotiated BLE notification. */
-#define FILE_BLOCK_SIZE 128U
+/* BLE actor fragments this 512-byte response block into BLE notifications. */
+#define FILE_BLOCK_SIZE 512U
+
+BUILD_ASSERT(MeasurementCurve_size <= 1024U,
+             "MeasurementCurve worst-case encoding must not exceed 1 KiB");
 
 IPC_CMD_DEFINE_LOCAL(MeasurementTick, { uint32_t session_id; });
 
 static bool acquisition_active;
 static uint32_t active_session;
 static uint32_t next_session;
-static uint32_t sequence;
 static MeasurementCurve curve;
 static uint8_t encoded_curve[MeasurementCurve_size];
 
@@ -40,7 +43,6 @@ static bool serialize_curve(uint32_t *crc, uint16_t *size)
         *crc = crc32_ieee_update(*crc, encoded_measurement, measurement_stream.bytes_written);
     }
 
-    curve.crc32 = *crc;
     pb_ostream_t stream = pb_ostream_from_buffer(encoded_curve, sizeof(encoded_curve));
     if (!pb_encode(&stream, MeasurementCurve_fields, &curve)) return false;
     *size = stream.bytes_written;
@@ -52,8 +54,7 @@ static void publish_curve(const RequestEnvelope *request)
     const GetMeasurementCurveRequest *request_curve = &request->payload.get_measurement_curve;
     uint8_t data[FILE_BLOCK_SIZE];
     size_t read = 0;
-    uint16_t wanted = MIN(request_curve->max_bytes ? request_curve->max_bytes : FILE_BLOCK_SIZE,
-                          FILE_BLOCK_SIZE);
+    uint16_t wanted = FILE_BLOCK_SIZE;
     printk("measurement actor: curve read offset=%u requested=%u\n", request_curve->offset,
            wanted);
     int rc = storage_read(CURVE_PATH, request_curve->offset, data, wanted, &read);
@@ -90,7 +91,6 @@ IPC_ACTOR_HANDLE(measurement_actor, AppRequestEvent, on_measurement_request)
     if (request->which_payload == RequestEnvelope_start_measurement_tag) {
         active_session = ++next_session;
         acquisition_active = false;
-        sequence = 0;
         curve = (MeasurementCurve){};
         strcpy(curve.id, CURVE_FILE_ID);
         curve.started_timestamp_ms = k_uptime_get();
@@ -119,7 +119,10 @@ IPC_ACTOR_HANDLE(measurement_actor, AppRequestEvent, on_measurement_request)
         }
         printk("measurement actor: writing curve size=%u count=%u crc=0x%08x\n", size,
                curve.count, crc);
+        uint8_t crc_trailer[sizeof(crc)];
+        sys_put_le32(crc, crc_trailer);
         int rc = storage_write(CURVE_PATH, encoded_curve, size);
+        if (rc == 0) rc = storage_append(CURVE_PATH, crc_trailer, sizeof(crc_trailer));
         if (rc != 0) {
             printk("measurement actor: curve write failed: %d\n", rc);
             return;
@@ -130,7 +133,6 @@ IPC_ACTOR_HANDLE(measurement_actor, AppRequestEvent, on_measurement_request)
         response.envelope.source = request->source;
         response.envelope.which_payload = ResponseEnvelope_stop_measurement_tag;
         strcpy(response.envelope.payload.stop_measurement.file_id, CURVE_FILE_ID);
-        response.envelope.payload.stop_measurement.crc32 = crc;
         (void)ipc_publish(AppResponseEvent, response);
     } else if (request->which_payload == RequestEnvelope_get_measurement_curve_tag) {
         publish_curve(request);
@@ -147,8 +149,7 @@ IPC_ACTOR_HANDLE(measurement_actor, MeasurementTick, on_measurement_tick)
         return;
     }
     Measurement *measurement = &curve.measurements[curve.measurements_count++];
-    measurement->sequence = ++sequence;
-    measurement->value = (int32_t)sequence;
+    measurement->value = curve.measurements_count - 1U;
     curve.count = curve.measurements_count;
     schedule_tick(active_session);
 }
